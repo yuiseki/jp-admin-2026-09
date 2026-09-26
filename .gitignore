@@ -1,0 +1,10 @@
+# The data itself lives on the Hugging Face Hub, not in git:
+#   https://huggingface.co/datasets/yuiseki/jp-admin-2026-09
+# 229 MB, rebuilt by scripts/01 from two published datasets. README.md,
+# LICENSE.data and provenance.yaml are tracked: they are the dataset card and
+# its notices, not the data.
+data/*.parquet
+
+__pycache__/
+*.pyc
+.venv/

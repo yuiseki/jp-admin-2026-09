@@ -1,0 +1,101 @@
+# Where this data comes from and what was done to it.
+
+sources:
+  - name: アドレス・ベース・レジストリ / Address Base Registry
+    dataset: yuiseki/abr-src-2026-09
+    revision: 3677b24f472218521a4ae728e6cb96926c7d1edf
+    publisher: デジタル庁 / Digital Agency
+    licence: CC BY 4.0, by way of PDL1.0 clause 1.7(3)
+    supplies: |
+      lg_code, the names in kanji, kana and Latin script at every rung, the
+      county and ward structure, the effective dates, and the representative
+      points of both prefectures and municipalities.
+    vintage: |
+      The prefecture and municipality masters were published 2024-03-12 and
+      have not changed since; municipalities rarely do.
+  - name: 令和2年国勢調査 小地域（町丁・字等別）境界データ
+    dataset: yuiseki/estat-boundary-2020
+    revision: 823195c40e1055e2c1b3c0a635369f8c82b6c3fb
+    publisher: 総務省統計局 via 政府統計の総合窓口 (e-Stat)
+    licence: CC BY 4.0, by way of 政府標準利用規約（第2.0版）
+    supplies: polygons, population and households
+    vintage: 2020 census, archives published 2022-06-23
+
+licence:
+  id: CC BY 4.0
+  share_alike: false
+  note: |
+    Neither source is share-alike, so the combination is CC BY and nothing
+    more. That is the reason this dataset exists beside the OpenStreetMap
+    ones, which are ODbL.
+
+join:
+  key: the five-digit municipality code
+  basis: |
+    lg_code[0:5] on the registry side and PREF + CITY on the census side.
+  matched: 1889 of 1918
+  unmatched:
+    - case: designated-city parents
+      count: 20
+      handling: |
+        The census has the wards and not the city, so the city's polygon is
+        the union of its wards and its counts are their sum. geometry_source
+        records it.
+    - case: villages of the Northern Territories
+      count: 6
+      which: [色丹村, 泊村, 留夜別村, 留別村, 紗那村, 蘂取村]
+      handling: |
+        The registry lists them and the census does not survey them. Name,
+        code and representative point are present; geometry, population and
+        households are null.
+    - case: wards Hamamatsu created in 2024
+      count: 3
+      which: [浜松市中央区, 浜松市浜名区, 浜松市天竜区]
+      handling: |
+        After the 2020 census, so no boundary exists for them. Hamamatsu
+        itself has one, built from the seven wards it had then.
+  null_not_zero: |
+    All nine carry null rather than 0. A village of nobody and a village
+    nobody counted are not the same thing.
+
+contents:
+  prefectures: 47
+  municipalities: 1918
+  designated_city_wards: 171
+  municipalities_in_a_county: 923
+  municipalities_without_geometry: 9
+  population: 126146099
+  population_note: |
+    The published total of the 2020 Population Census, reached independently
+    here by summing small areas into municipalities and municipalities into
+    prefectures. It is the strongest check in the build: a mis-grouped code
+    or a designated city counted twice would not add up.
+  crs: JGD2000, longitude and latitude, unprojected and unsimplified
+
+processing:
+  - step: build
+    script: scripts/01_build.py
+    modifications: |
+      Small-area polygons dissolved by municipality code; designated cities
+      assembled from their wards; municipalities dissolved by prefecture;
+      population and households summed at both rungs; the registry joined on
+      the five-digit code; CSV and shapefile converted to Parquet.
+  - step: verify
+    script: scripts/02_verify.py
+    checks: |
+      The row counts, the county and ward counts, the nine without geometry,
+      both national population sums against the census total, uniqueness of
+      lg_code, every municipality's prefecture present, every geometry valid,
+      and every geometry inside Japan.
+
+not_included:
+  - what: anything finer than a municipality
+    reason: |
+      The 727,428 町字 are published whole in abr-src-2026-09 and the 232,019
+      census small areas in estat-boundary-2020. A third copy would be a
+      liability rather than a convenience.
+  - what: a simplified or projected geometry
+    reason: |
+      The polygons are the census's own, dissolved and otherwise untouched. A
+      simplification belongs downstream, where the tolerance can be chosen for
+      the use.

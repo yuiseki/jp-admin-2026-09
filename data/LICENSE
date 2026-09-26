@@ -1,0 +1,43 @@
+Creative Commons Attribution 4.0 International (CC BY 4.0)
+https://creativecommons.org/licenses/by/4.0/
+
+This dataset is built from two sources, both CC BY 4.0, and carries the
+same licence.
+
+  出典：「アドレス・ベース・レジストリ」（デジタル庁）
+  https://www.digital.go.jp/policies/base_registry_address
+
+  出典：「令和2年国勢調査 小地域（町丁・字等別）境界データ」
+  （政府統計の総合窓口(e-Stat) https://www.e-stat.go.jp/ ）
+
+The Digital Agency applies PDL1.0, 公共データ利用規約（第1.0版）, whose
+clause 1.7(3) permits use in accordance with CC BY 4.0. e-Stat applies
+政府標準利用規約（第2.0版）, whose own text states the same compatibility.
+Neither is share-alike, so this combination is CC BY and nothing more.
+
+Both sets of terms ask that a modification be declared separately from the
+attribution.
+
+  本データセットは「アドレス・ベース・レジストリ」（デジタル庁）および
+  「令和2年国勢調査 小地域境界データ」（政府統計の総合窓口(e-Stat)）を
+  加工して作成しています。加工の内容は次のとおりです。
+
+  1. 国勢調査の小地域ポリゴンを市区町村コードで結合し、市区町村の
+     ポリゴンを作成した。政令指定都市については行政区のポリゴンを
+     結合して市のポリゴンとした
+  2. 上記を都道府県コードで結合し、都道府県のポリゴンを作成した
+  3. 小地域の人口と世帯数を市区町村および都道府県ごとに合計した
+  4. アドレス・ベース・レジストリの都道府県マスター、市区町村マスター
+     およびそれぞれの位置参照拡張と、上記を市区町村コードで結合した
+  5. CSV およびシェープファイルを Parquet 形式に変換した
+
+  属性値そのものは変更していません。座標系は原本のまま JGD2000 です。
+
+Nothing was reprojected, simplified or reinterpreted. The two sources are
+published unchanged as yuiseki/abr-src-2026-09 and
+yuiseki/estat-boundary-2020, each with the publisher's own archives beside
+it, so every step here can be checked against bytes rather than against this
+description.
+
+The code that builds this is MIT, in the repository it was built from, and
+does not apply here.
