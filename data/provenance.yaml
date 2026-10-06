@@ -71,6 +71,36 @@ contents:
     prefectures. It is the strongest check in the build: a mis-grouped code
     or a designated city counted twice would not add up.
   crs: JGD2000, longitude and latitude, unprojected and unsimplified
+  crs_id: EPSG:4612
+  crs_evidence: |
+    The .prj in all 47 census archives of estat-boundary-2020 is the same
+    GEOGCS["GCS_JGD_2000",DATUM["D_JGD_2000",SPHEROID["GRS_1980",...]]],
+    which PROJ identifies as EPSG:4612. Neither estat-boundary-2020 nor this
+    build reprojects, so the polygons are in it. It is not JGD2011
+    (EPSG:6668): that is what the publisher declares for the 2020 census.
+    The CRS covers geometry and bbox; rep_lon and rep_lat are the registry's
+    and its mirror does not state a datum for them.
+
+layout:
+  format: GeoParquet 1.1.0, zstd
+  geo_metadata: |
+    primary_column geometry, encoding WKB, geometry_types from the data
+    (MultiPolygon, Polygon), the overall bbox, crs as the PROJJSON of
+    EPSG:4612, and a covering that points at the bbox column.
+  sort: |
+    municipalities by pref_code then lg_code; prefectures by pref_code. The
+    keys are code strings, so the sort is exact and touches no float.
+  row_groups: |
+    One per prefecture in both files, 47 each. The footer statistics of
+    pref_code, code5 and lg_code then name the single row group that holds a
+    code. Municipality row groups run from 1.2 to 13.0 MB uncompressed and
+    prefecture ones from 0.3 to 12.6 MB. Grouping several prefectures per row
+    group would save under 0.1 MB in the prefecture file and make every
+    single-prefecture read several times larger.
+  bbox: |
+    A struct column (xmin, ymin, xmax, ymax), the bounds of geometry, null
+    where geometry is. The GeoParquet covering for geometry: WKB has no
+    statistics, and these four columns do.
 
 processing:
   - step: build
@@ -79,14 +109,21 @@ processing:
       Small-area polygons dissolved by municipality code; designated cities
       assembled from their wards; municipalities dissolved by prefecture;
       population and households summed at both rungs; the registry joined on
-      the five-digit code; CSV and shapefile converted to Parquet.
+      the five-digit code; CSV and shapefile converted to Parquet; each
+      polygon's bounds added as the bbox column. Rows sorted by code and
+      written one prefecture per row group, with GeoParquet metadata.
   - step: verify
     script: scripts/02_verify.py
     checks: |
       The row counts, the county and ward counts, the nine without geometry,
       both national population sums against the census total, uniqueness of
       lg_code, every municipality's prefecture present, every geometry valid,
-      and every geometry inside Japan.
+      and every geometry inside Japan. The layout: sorted by the codes, one
+      prefecture per row group by the footer statistics, the geo metadata
+      true of the data (EPSG:4612, types, bbox) and each bbox the bounds of
+      its polygon. With --reference DIR, every row of an earlier build, all
+      its columns with floats compared by their bytes, must be here exactly
+      as often and no other row may be.
 
 not_included:
   - what: anything finer than a municipality

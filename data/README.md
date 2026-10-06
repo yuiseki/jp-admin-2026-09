@@ -61,7 +61,8 @@ muni = load_dataset("yuiseki/jp-admin-2026-09", "municipalities", split="train")
 | `population`, `households` | the 2020 census, summed from small areas |
 | `small_areas` | how many were summed |
 | `geometry_source` | `census small areas`, `union of its wards`, or `none` |
-| `geometry` | WKB polygon, JGD2000 longitude and latitude |
+| `geometry` | WKB polygon, JGD2000 longitude and latitude (EPSG:4612) |
+| `bbox` | the polygon's bounds, `xmin`, `ymin`, `xmax`, `ymax`; null where `geometry` is |
 
 The national population sums to **126,146,099**, which is the published total
 of the 2020 census. That is the check worth trusting: if the small areas had
@@ -71,6 +72,34 @@ areas and its wards', it would not come out.
 A ward and its parent city cover the same ground, so a national sum must be
 taken over the rows where `ward` is null. The prefecture table has done that
 already.
+
+## How the files are laid out
+
+Both files are GeoParquet 1.1. The `geo` metadata names `geometry` as WKB,
+gives its types, its overall bbox and its coordinate reference system as
+PROJJSON, EPSG:4612, JGD2000 longitude and latitude. That is the datum the
+census declares in the `.prj` of all 47 of its archives, and nothing here
+reprojects. GeoPandas, QGIS and DuckDB pick the geometry and the CRS up
+without being told.
+
+Rows are sorted by `pref_code`, then `lg_code`, and each prefecture is one
+row group, in both files: 47 row groups each. The Parquet statistics of
+`pref_code`, `code5` and `lg_code` then say which row group a code is in,
+and a reader that filters on one fetches that prefecture and nothing else.
+Fetching 千代田区 reads Tokyo's 2.7 MB rather than the whole 149 MB file;
+the largest row group is Nagasaki's 11 MB, all those islands.
+
+```sql
+-- DuckDB, over HTTP: one row group of 47
+SELECT name, population, geometry
+FROM 'hf://datasets/yuiseki/jp-admin-2026-09/municipalities.parquet'
+WHERE lg_code = '131016';
+```
+
+`bbox` is the GeoParquet covering column for `geometry`. WKB carries no
+statistics, so a filter by area works on `bbox.xmin` and the rest, and skips
+the prefectures that the area misses. Its values are the polygon's own
+bounds, which `geometry` already implies; it adds 0.1 MB.
 
 ## Where each column comes from
 
@@ -151,5 +180,5 @@ CC BY 4.0.
 
 The Digital Agency applies PDL1.0 and e-Stat applies 政府標準利用規約
 （第2.0版）; both state compatibility with CC BY 4.0 and neither is
-share-alike. `LICENSE.data` lists the five modifications in Japanese, as both
+share-alike. `LICENSE` lists the six modifications in Japanese, as both
 sets of terms ask.

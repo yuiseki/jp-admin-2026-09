@@ -63,6 +63,111 @@ PREFECTURE_FIELDS = [
     ("geometry", "binary"),
 ]
 
+# Sorted by the codes and nothing else. They are strings, so the sort is exact;
+# a DOUBLE used as a sort key in DuckDB 1.5.6 comes back with -0.0 as 0.0.
+MUNICIPALITY_SORT = ("pref_code", "lg_code")
+PREFECTURE_SORT = ("pref_code",)
+
+# The coordinate reference system of every polygon. All 47 census archives
+# carry the same .prj, GEOGCS["GCS_JGD_2000",DATUM["D_JGD_2000",
+# SPHEROID["GRS_1980",...]]], which is EPSG:4612, JGD2000 geographic. Nothing
+# in the build reprojects: estat-boundary-2020 copies the shapefile's
+# coordinates into WKB, and the dissolve keeps them. It is JGD2000 and not
+# JGD2011 because that is what the publisher declares for the 2020 census.
+#
+# PROJJSON, written out rather than generated so that the metadata does not
+# change with the installed PROJ database. pyproj 3.7.1 (PROJ 9.5.1, EPSG
+# v11.022) produced it from EPSG:4612, and tests/test_build.py reads it back.
+CRS = {
+    "$schema": "https://proj.org/schemas/v0.7/projjson.schema.json",
+    "type": "GeographicCRS",
+    "name": "JGD2000",
+    "datum": {
+        "type": "GeodeticReferenceFrame",
+        "name": "Japanese Geodetic Datum 2000",
+        "ellipsoid": {"name": "GRS 1980", "semi_major_axis": 6378137,
+                      "inverse_flattening": 298.257222101},
+    },
+    "coordinate_system": {
+        "subtype": "ellipsoidal",
+        "axis": [
+            {"name": "Geodetic latitude", "abbreviation": "Lat",
+             "direction": "north", "unit": "degree"},
+            {"name": "Geodetic longitude", "abbreviation": "Lon",
+             "direction": "east", "unit": "degree"},
+        ],
+    },
+    "scope": "Horizontal component of 3D system.",
+    "area": "Japan - onshore and offshore.",
+    "bbox": {"south_latitude": 17.09, "west_longitude": 122.38,
+             "north_latitude": 46.05, "east_longitude": 157.65},
+    "id": {"authority": "EPSG", "code": 4612},
+}
+
+GEOMETRY_TYPES = {1: "Point", 2: "LineString", 3: "Polygon", 4: "MultiPoint",
+                  5: "MultiLineString", 6: "MultiPolygon",
+                  7: "GeometryCollection"}
+
+
+def write(rows, fields, path, sort_by, group_by):
+    """GeoParquet 1.1: sorted by the codes, one row group per group_by value,
+    a bbox covering column after the original columns, and the CRS.
+
+    Every column in fields is written as it is in rows. The bbox column is
+    the only addition: four doubles per row, the geometry's own bounds, null
+    where the geometry is null. Its per-row-group statistics are what let a
+    reader skip row groups by area, since WKB carries none.
+    """
+    import itertools
+    import json
+
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    import shapely
+
+    rows = sorted(rows, key=lambda r: tuple(r[k] for k in sort_by))
+    types = {"string": pa.string(), "int64": pa.int64(),
+             "float64": pa.float64(), "binary": pa.binary()}
+    bbox_type = pa.struct([(k, pa.float64())
+                           for k in ("xmin", "ymin", "xmax", "ymax")])
+
+    geoms = shapely.from_wkb([r["geometry"] for r in rows])
+    present = [g for g in geoms if g is not None]
+    bounds = [None if g is None else
+              dict(zip(("xmin", "ymin", "xmax", "ymax"), g.bounds))
+              for g in geoms]
+    total = shapely.total_bounds(present).tolist()
+    geo = {
+        "version": "1.1.0",
+        "primary_column": "geometry",
+        "columns": {"geometry": {
+            "encoding": "WKB",
+            "geometry_types": sorted({GEOMETRY_TYPES[int(t)] for t in
+                                      shapely.get_type_id(present)}),
+            "crs": CRS,
+            "bbox": total,
+            "covering": {"bbox": {k: ["bbox", k] for k in
+                                  ("xmin", "ymin", "xmax", "ymax")}},
+        }},
+    }
+    schema = pa.schema([pa.field(n, types[t]) for n, t in fields]
+                       + [pa.field("bbox", bbox_type)],
+                       metadata={"geo": json.dumps(geo)})
+
+    with pq.ParquetWriter(path, schema, compression="zstd") as w:
+        i = 0
+        for _, group in itertools.groupby(rows, key=lambda r: r[group_by]):
+            group = list(group)
+            cols = [pa.array([r[n] for r in group], type=types[t])
+                    for n, t in fields]
+            cols.append(pa.array(bounds[i:i + len(group)], type=bbox_type))
+            i += len(group)
+            w.write_table(pa.Table.from_arrays(cols, schema=schema),
+                          row_group_size=len(group))
+    md = pq.ParquetFile(path).metadata
+    print(f"  {path.name}: {md.num_rows:,} rows in {md.num_row_groups} "
+          f"row groups, {path.stat().st_size:,} bytes")
+
 
 def abr_table(name, revision=ABR_REV):
     from datasets import load_dataset
@@ -94,8 +199,6 @@ def main():
     ap.add_argument("--out", default=str(OUT))
     a = ap.parse_args()
 
-    import pyarrow as pa
-    import pyarrow.parquet as pq
     from shapely import wkb as shapely_wkb
     from shapely.ops import unary_union
 
@@ -210,17 +313,12 @@ def main():
         })
     print(f"prefectures built: {len(pref)}")
 
-    def write(rows, fields, path):
-        types = {"string": pa.string(), "int64": pa.int64(),
-                 "float64": pa.float64(), "binary": pa.binary()}
-        schema = pa.schema([pa.field(n, types[t]) for n, t in fields])
-        cols = [pa.array([r[n] for r in rows], type=types[t]) for n, t in fields]
-        pq.write_table(pa.Table.from_arrays(cols, schema=schema), path,
-                       compression="zstd")
-        print(f"  {path.name}: {len(rows):,} rows, {path.stat().st_size:,} bytes")
-
-    write(muni, MUNICIPALITY_FIELDS, out / "municipalities.parquet")
-    write(pref, PREFECTURE_FIELDS, out / "prefectures.parquet")
+    # One prefecture per row group in both files, so that a reader filtering
+    # on pref_code, code5 or lg_code fetches that prefecture's bytes only.
+    write(muni, MUNICIPALITY_FIELDS, out / "municipalities.parquet",
+          sort_by=MUNICIPALITY_SORT, group_by="pref_code")
+    write(pref, PREFECTURE_FIELDS, out / "prefectures.parquet",
+          sort_by=PREFECTURE_SORT, group_by="pref_code")
     return 0
 
 
